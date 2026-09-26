@@ -1,0 +1,117 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "recipe_digest",
+    "started_at",
+    "elapsed_seconds",
+    "as_of",
+    "parameters",
+    "inputs",
+    "output_path",
+    "output_sha256",
+    "output_bytes",
+    "tests_passed",
+    "fixture_cache_hit",
+    "backend",
+    "runtime_fingerprint",
+    "published"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "recipe_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "started_at": {
+      "type": "string"
+    },
+    "elapsed_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "as_of": {
+      "type": "string"
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "kind",
+          "identity"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "directory"
+            ]
+          },
+          "identity": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          }
+        }
+      }
+    },
+    "output_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "output_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "output_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tests_passed": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "fixture_cache_hit": {
+      "type": "boolean"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "runtime_fingerprint": {
+      "type": "string"
+    },
+    "published": {
+      "type": "boolean"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sheetbend-any:run:1",
+  "title": "Completed run receipt, version 1",
+  "description": "Input identities are metadata observations, not content hashes or recursive snapshots. published=false denotes a staged result not yet sent to the destination."
+}

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Repository: any. Distribution: sheetbend-any. Import: sheetbend_any. Command: any.
+name = "sheetbend-any"
+version = "0.1.0"
+description = "Generate, test, cache, and confine small file-processing programs."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "Jason L Weirather"}]
+dependencies = [
+    "click>=8.1,<9",
+    "jsonschema>=4.23,<5",
+    "psutil>=7,<8",
+    "sheetbend[llm]>=0.5,<0.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.11"]
+
+[project.scripts]
+any = "sheetbend_any.cli:main"
+
+[project.urls]
+Repository = "https://github.com/jason-weirather/any"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sheetbend_any = ["schemas/*.json", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "sandbox: requires an actual supported operating-system sandbox",
+    "inference: uses the actual Sheetbend/LLM stack against a loopback test server",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

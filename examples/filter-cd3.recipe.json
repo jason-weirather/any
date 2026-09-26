@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "runtime": "python-stdlib-v1",
+  "description": "Keep rows where CD3 exceeds a numeric threshold, preserving columns and row order.",
+  "code": "import csv\nimport math\n\n\ndef run(inputs, output, params, context):\n    with inputs[0].open(\"r\", encoding=\"utf-8-sig\", newline=\"\") as source:\n        reader = csv.DictReader(source)\n        with output.open(\"w\", encoding=\"utf-8\", newline=\"\") as target:\n            writer = csv.DictWriter(target, fieldnames=reader.fieldnames, lineterminator=\"\\n\")\n            writer.writeheader()\n            for index, row in enumerate(reader, start=2):\n                if None in row or any(value is None for value in row.values()):\n                    raise ValueError(f\"Row {index} has the wrong number of fields\")\n                try:\n                    value = float(row[\"CD3\"])\n                except ValueError as exc:\n                    raise ValueError(f\"Invalid CD3 at row {index}\") from exc\n                if not math.isfinite(value):\n                    raise ValueError(f\"Nonfinite CD3 at row {index}\")\n                if value > params[\"threshold\"]:\n                    writer.writerow(row)\n",
+  "inputs": [
+    {
+      "kind": "file",
+      "format": "csv",
+      "required_columns": [
+        "cell_id",
+        "CD3"
+      ]
+    }
+  ],
+  "output": {
+    "format": "csv",
+    "required_columns": [
+      "cell_id",
+      "CD3"
+    ]
+  },
+  "parameters": {
+    "threshold": {
+      "type": "number",
+      "default": 20,
+      "description": "Exclusive lower bound for CD3."
+    }
+  },
+  "tests": [
+    {
+      "name": "boundary-order-and-leading-zero-ids",
+      "files": [
+        {
+          "input_index": 0,
+          "path": "",
+          "content": "cell_id,CD3,note\n001,19,low\n002,20,boundary\n003,21,\"a,b\"\n004,42,high\n"
+        }
+      ],
+      "parameters": {},
+      "expected_output": "cell_id,CD3,note\n003,21,\"a,b\"\n004,42,high\n"
+    },
+    {
+      "name": "reject-nonnumeric",
+      "files": [
+        {
+          "input_index": 0,
+          "path": "",
+          "content": "cell_id,CD3\n1,bad\n"
+        }
+      ],
+      "parameters": {},
+      "expected_output": null
+    }
+  ]
+}
