@@ -126,6 +126,9 @@ def macos_profile(control: Path, work: Path, output: Path, inputs: list[Path]) -
             *(_filter(path, directory=path.is_dir()) for path in inputs)]
     profile = [
         "(version 1)", "(deny default)",
+        # macOS may abort the sandboxed process at launch unless it can read
+        # the root directory node. A literal grant does not expose descendants.
+        '(allow file-read* (literal "/"))',
         f"(allow process-exec {_filter(python, directory=False)})",
         "(allow process-info* (target self))",
         "(allow sysctl-read)",

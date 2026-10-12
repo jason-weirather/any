@@ -54,6 +54,9 @@ def test_macos_profile_escapes_paths_and_denies_broad_effects(tmp_path):
     out.touch()
     profile = macos_profile(control, work, out, [])
     assert "(deny default)" in profile
+    # Root access is needed for launch, but must never become a recursive read grant.
+    assert '(allow file-read* (literal "/"))' in profile
+    assert '(subpath "/")' not in profile
     assert '(deny network*)' in profile and '(deny process-fork)' in profile
     assert '(deny system-socket)' in profile
     assert '\\"quoted' in profile
