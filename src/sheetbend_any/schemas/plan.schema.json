@@ -17,7 +17,10 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "recipe_digest": {
       "type": "string",
@@ -92,9 +95,42 @@
     "execution_performed": {
       "type": "boolean",
       "const": false
+    },
+    "execution_kind": {
+      "enum": [
+        "shell",
+        "python"
+      ]
+    },
+    "command": {
+      "type": "string"
+    },
+    "tools": {
+      "type": "object"
+    },
+    "fallback_reason": {
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sheetbend-any:plan:1",
-  "title": "Bound invocation preview, version 1"
+  "$id": "urn:sheetbend-any:plan:2",
+  "title": "Plan contract, versions 1 and 2",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "execution_kind",
+          "command",
+          "tools"
+        ]
+      }
+    }
+  ]
 }

@@ -24,7 +24,7 @@ class TestReport:
     cache_hit: bool = False
 
 
-def check_recipe(recipe: Recipe, sandbox: Sandbox) -> TestReport:
+def check_recipe(recipe: Recipe, sandbox: Sandbox, *, inventory: dict | None = None) -> TestReport:
     """Run every fixture, failing at the first unexpected error or byte mismatch."""
     document = recipe.to_dict()
     sandbox.require_available()
@@ -50,10 +50,14 @@ def check_recipe(recipe: Recipe, sandbox: Sandbox) -> TestReport:
                 os.utime(path, (timestamp, timestamp))
             expected = case["expected_output"]
             try:
-                with sandbox.execute(
-                    recipe.code, inputs=paths, parameters=recipe.bind_parameters(case["parameters"]),
-                    context={"now": FIXTURE_NOW, "input_names": [path.name for path in paths]},
+                execute = sandbox.execute_shell if recipe.is_shell else sandbox.execute
+                payload = recipe.pipeline if recipe.is_shell else recipe.code
+                with execute(
+                    payload, inputs=paths, parameters=recipe.bind_parameters(case["parameters"]),
+                    context={"now": FIXTURE_NOW, "input_names": [path.name for path in paths],
+                             "any_phase": "fixture"},
                     output_suffix=SUFFIXES[document["output"]["format"]],
+                    **({"inventory": inventory} if recipe.is_shell else {}),
                 ) as result:
                     if expected is None:
                         raise ContractError(f"Fixture {case['name']!r}: expected a program error, but it succeeded.")
@@ -65,5 +69,5 @@ def check_recipe(recipe: Recipe, sandbox: Sandbox) -> TestReport:
                         raise ContractError(f"Fixture {case['name']!r}: output does not match the expected bytes.")
             except ExecutionError as exc:
                 if expected is not None or exc.returncode != 1:
-                    raise ContractError(f"Fixture {case['name']!r}: confined execution failed.") from exc
+                    raise ContractError(f"Fixture {case['name']!r}: confined execution failed: {exc}") from exc
     return TestReport(recipe.digest, len(document["tests"]))

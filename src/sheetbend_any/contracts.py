@@ -13,7 +13,7 @@ MAX_DOCUMENT_BYTES = 262_144
 
 def load_schema(name: str = "recipe") -> dict[str, Any]:
     """Return an independent authoritative schema without resolving external references."""
-    if name not in {"recipe", "plan", "run"}:
+    if name not in {"recipe", "plan", "run", "planner"}:
         raise ValueError("Unknown schema name.")
     return json.loads(files("sheetbend_any").joinpath("schemas", f"{name}.schema.json").read_text())
 
@@ -52,8 +52,21 @@ def parse_json(text: str | bytes) -> Any:
 
 def validate_document(value: Any, name: str) -> None:
     canonical_json(value)
-    error = next(Draft202012Validator(load_schema(name)).iter_errors(value), None)
+    schema = load_schema(name)
+    # Select the explicitly versioned branch for actionable field locations,
+    # instead of reporting only a root-level oneOf failure for every typo.
+    version = value.get("schema_version") if isinstance(value, dict) else None
+    if name == "recipe" and type(version) in (int, float) and version in (1, 2):
+        # JSON Schema treats 1 and 1.0 as the same number, but never true as 1.
+        schema = schema["$defs"][f"v{int(version)}"]
+    error = next(Draft202012Validator(schema).iter_errors(value), None)
     if error is not None:
         location = ".".join(map(str, error.absolute_path)) or "<root>"
         # Do not echo rejected code, samples, or arbitrary model text in diagnostics.
-        raise ContractError(f"Invalid {name} at {location}: violates {error.validator}.")
+        expectation = ""
+        if error.validator == "required" and isinstance(error.instance, dict):
+            missing = [key for key in error.validator_value if key not in error.instance]
+            expectation = f" Missing fields: {', '.join(missing)}."
+        elif error.validator in {"type", "minItems", "maxItems", "minLength", "maxLength", "const"}:
+            expectation = f" Expected {error.validator_value!r}."
+        raise ContractError(f"Invalid {name} at {location}: violates {error.validator}.{expectation}")

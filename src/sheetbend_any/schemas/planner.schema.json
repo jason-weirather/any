@@ -1,0 +1,423 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sheetbend-any:planner:1",
+  "title": "Bounded planning action",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action",
+    "commands",
+    "recipe"
+  ],
+  "properties": {
+    "action": {
+      "enum": [
+        "tools",
+        "final"
+      ]
+    },
+    "commands": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "recipe": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/recipe"
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "action": {
+          "const": "tools"
+        },
+        "commands": {
+          "minItems": 1
+        },
+        "recipe": {
+          "type": "null"
+        }
+      }
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "final"
+        },
+        "commands": {
+          "maxItems": 0
+        },
+        "recipe": {
+          "$ref": "#/$defs/recipe"
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "description",
+        "code",
+        "inputs",
+        "output",
+        "parameters",
+        "tests",
+        "kind",
+        "pipeline",
+        "fallback_reason"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 2
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "code": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 65536
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "format",
+              "required_columns"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "file",
+                  "directory"
+                ]
+              },
+              "format": {
+                "enum": [
+                  "csv",
+                  "tsv",
+                  "json",
+                  "text",
+                  "bytes",
+                  "directory"
+                ]
+              },
+              "required_columns": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "uniqueItems": true,
+                "maxItems": 256
+              }
+            }
+          },
+          "maxItems": 32
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "required_columns"
+          ],
+          "properties": {
+            "format": {
+              "enum": [
+                "csv",
+                "tsv",
+                "json",
+                "text",
+                "bytes"
+              ]
+            },
+            "required_columns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "uniqueItems": true,
+              "maxItems": 256
+            }
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "default",
+              "description"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "string",
+                  "integer",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              "default": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          },
+          "maxProperties": 32
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "files",
+              "parameters",
+              "expected_output"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "input_index",
+                    "path",
+                    "content"
+                  ],
+                  "properties": {
+                    "input_index": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 31
+                    },
+                    "path": {
+                      "type": "string",
+                      "maxLength": 512
+                    },
+                    "content": {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    "modified_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "description": "Optional aware ISO timestamp; null/omitted uses the fixed fixture clock."
+                    }
+                  }
+                },
+                "maxItems": 32
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "expected_output": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 32768
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 4
+        },
+        "kind": {
+          "enum": [
+            "shell",
+            "python"
+          ]
+        },
+        "fallback_reason": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "pipeline": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "argv"
+            ],
+            "properties": {
+              "argv": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "cat",
+                      "sort",
+                      "uniq",
+                      "cut",
+                      "wc",
+                      "head",
+                      "tail",
+                      "grep",
+                      "sed",
+                      "tr",
+                      "comm",
+                      "join",
+                      "find",
+                      "awk",
+                      "jq",
+                      "mlr",
+                      "printf"
+                    ]
+                  }
+                ],
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "input"
+                      ],
+                      "properties": {
+                        "input": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 31
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "param"
+                      ],
+                      "properties": {
+                        "param": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "context"
+                      ],
+                      "properties": {
+                        "context": {
+                          "const": "now"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "shell"
+            },
+            "code": {
+              "const": ""
+            },
+            "pipeline": {
+              "minItems": 1
+            },
+            "fallback_reason": {
+              "const": ""
+            }
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "python"
+            },
+            "code": {
+              "minLength": 1
+            },
+            "pipeline": {
+              "maxItems": 0
+            },
+            "fallback_reason": {
+              "minLength": 1
+            },
+            "tests": {
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    }
+  }
+}

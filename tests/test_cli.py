@@ -22,18 +22,19 @@ def test_output_option_is_required():
     assert result.exit_code == 2 and "output" in result.output
 
 
-def test_dry_run_from_recipe_file_never_needs_sandbox_or_sheetbend(table, tmp_path, monkeypatch, cli_runner):
+def test_plan_only_from_recipe_file_never_needs_sandbox_or_sheetbend(table, tmp_path, monkeypatch, cli_runner):
     from sheetbend_any.sandbox import Sandbox
     def forbidden(*args, **kwargs):
-        pytest.fail("Dry-run must not execute or probe a sandbox")
+        pytest.fail("Plan-only must not execute or probe a sandbox")
     monkeypatch.setattr(Sandbox, "execute", forbidden)
     monkeypatch.setattr(Sandbox, "require_available", forbidden)
     path = Path(__file__).parents[1] / "examples/filter-cd3.recipe.json"
     out = tmp_path / "out.csv"
-    result = cli_runner.invoke(main, ["--recipe-file", str(path), "-i", str(table), "-o", str(out), "--dry-run", "--no-cache"])
+    result = cli_runner.invoke(main, ["--recipe-file", str(path), "-i", str(table), "-o", str(out), "--plan-only", "--no-cache"])
     assert result.exit_code == 0, result.output
-    assert "def run" in result.stdout and "execution_performed" in result.stdout
-    assert result.stderr == "" and not out.exists()
+    assert "def run" in result.stderr and "execution_performed" in result.stderr
+    assert "sandbox and output-parent write probe NOT performed" in result.stderr
+    assert result.stdout == "" and not out.exists()
     assert not (tmp_path / "cache-base").exists()
 
 
@@ -61,8 +62,12 @@ def test_saved_recipe_listing_is_offline(recipe, tmp_path):
 @pytest.mark.parametrize("options", [
     ["task", "--recipe", "name", "-o", "-"],
     ["task", "-o", "-", "--dry-run", "--check"],
+    ["task", "-o", "-", "--plan-only", "--check"],
+    ["task", "-o", "-", "--dryrun", "--plan-only"],
     ["task", "-o", "-", "--no-cache", "--save-recipe", "name"],
     ["--doctor", "task"], ["--doctor", "--list-recipes"],
+    ["--history", "--list-tools"], ["--list-tools", "task"],
+    ["--history", "--no-cache"],
     ["--recipe", "name", "-o", "-", "--regenerate"],
     ["--recipe", "name", "-o", "-", "--source", "model"],
 ])

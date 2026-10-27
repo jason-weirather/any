@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 # Repository: any. Distribution: sheetbend-any. Import: sheetbend_any. Command: any.
 name = "sheetbend-any"
-version = "0.1.0"
-description = "Generate, test, cache, and confine small file-processing programs."
+version = "0.2.0"
+description = "Plan, inspect, cache, and confine ordinary file-processing command pipelines."
 readme = "README.md"
 requires-python = ">=3.13"
 license = "Apache-2.0"

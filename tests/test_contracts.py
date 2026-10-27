@@ -11,7 +11,7 @@ from sheetbend_any.errors import ContractError
 
 
 def test_packaged_schemas_and_single_authored_version(recipe):
-    for name in ("recipe", "plan", "run"):
+    for name in ("recipe", "plan", "run", "planner"):
         Draft202012Validator.check_schema(load_schema(name))
     project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     assert project["project"]["version"] == __version__
@@ -60,6 +60,20 @@ def test_duplicate_json_keys_and_nonfinite_values_rejected():
     for value in ('{"schema_version":1,"schema_version":2}', '{"x":NaN}', '```json\n{}\n```'):
         with pytest.raises(ContractError):
             Recipe.from_json(value)
+
+
+@pytest.mark.parametrize("version", [True, False, "1", None])
+def test_malformed_version_is_a_contract_error(recipe, version):
+    data = recipe.to_dict()
+    data["schema_version"] = version
+    with pytest.raises(ContractError):
+        Recipe(data)
+
+
+def test_numeric_version_uses_json_schema_number_semantics(recipe):
+    data = recipe.to_dict()
+    data["schema_version"] = 1.0
+    assert Recipe(data).code == recipe.code
 
 
 def test_required_input_columns_are_checked_on_replay(recipe, table):

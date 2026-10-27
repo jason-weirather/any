@@ -14,7 +14,7 @@ class PermissionError(AnyError):
 
 
 class GenerationError(AnyError):
-    """Recipe generation failed; no alternate source or automatic repair was used."""
+    """Planning failed or exhausted bounded repairs; no alternate source was used."""
 
 
 class SandboxError(AnyError):

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import os
 from pathlib import Path
+import secrets
 import stat
 from types import MappingProxyType
 from typing import Any
@@ -173,3 +174,78 @@ class Request:
     def context(self) -> dict[str, Any]:
         """Values available to a program; paths and permissions remain separate."""
         return {"now": self.as_of, "input_names": [item.path.name for item in self.inputs]}
+
+    def preflight(self, *, probe_output: bool = True) -> dict[str, Any]:
+        """Open declared roots and optionally test publication in the authorized parent.
+
+        The private create/link/replace probes never open the final destination for
+        writing. They establish current access, not future quota/space or a snapshot
+        of directory descendants. Runtime and publication still recheck authority.
+        """
+        self.recheck()
+        checked = []
+        for item in self.inputs:
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            if item.kind == "directory":
+                flags |= os.O_DIRECTORY
+            try:
+                fd = os.open(item.path, flags)
+                try:
+                    if identity(os.fstat(fd)) != item.identity:
+                        raise ContractError(f"Input changed while opening it: {item.path}")
+                    if item.kind == "file":
+                        os.read(fd, 1)
+                    else:
+                        with os.scandir(fd) as entries:
+                            next(entries, None)
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                raise PermissionError(f"Cannot read declared {item.kind}: {item.path}: {exc.strerror}") from exc
+            checked.append({"path": str(item.path), "kind": item.kind, "readable": True})
+        output_checked = False
+        if probe_output and self.output_path is not None:
+            parent = self.output_path.parent
+            fd = None
+            names = [f".any-preflight-{secrets.token_hex(12)}" for _ in range(2)]
+            created = []
+            try:
+                fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                info = os.fstat(fd)
+                if (info.st_dev, info.st_ino) != self.parent_identity:
+                    raise PermissionError("Output parent changed before permission preflight.")
+                handle = os.open(names[0], os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                                 0o600, dir_fd=fd)
+                created.append(names[0])
+                try:
+                    os.write(handle, b"any-preflight\n")
+                finally:
+                    os.close(handle)
+                if self.output_identity is None:
+                    os.link(names[0], names[1], src_dir_fd=fd, dst_dir_fd=fd,
+                            follow_symlinks=False)
+                    created.append(names[1])
+                else:
+                    target = os.open(names[1], os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                                     0o600, dir_fd=fd)
+                    created.append(names[1])
+                    os.close(target)
+                    os.replace(names[0], names[1], src_dir_fd=fd, dst_dir_fd=fd)
+                output_checked = True
+            except OSError as exc:
+                raise PermissionError(f"Cannot publish in output directory: {parent}: {exc.strerror}") from exc
+            finally:
+                if fd is not None:
+                    try:
+                        for name in created:
+                            try:
+                                os.unlink(name, dir_fd=fd)
+                            except FileNotFoundError:
+                                pass
+                    finally:
+                        os.close(fd)
+        self.recheck()
+        return {"inputs": checked, "directory_descendants_checked": False,
+                "output_parent_probe": output_checked,
+                "output_path": None if self.output_path is None else str(self.output_path),
+                "task_execution_performed": False}

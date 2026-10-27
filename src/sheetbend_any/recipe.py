@@ -11,6 +11,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from .command_plan import validate_pipeline
 from .contracts import canonical_json, parse_json, validate_document
 from .errors import ContractError
 from .inspection import read_columns
@@ -25,36 +26,25 @@ class Recipe:
         validate_document(data, "recipe")
         if len(canonical_json(data)) > 262144:
             raise ContractError("Recipe exceeds 256 KiB.")
-        try:
-            tree = ast.parse(data["code"])
-            compile(tree, "<any-recipe>", "exec")
-        except (SyntaxError, ValueError, RecursionError) as exc:
-            raise ContractError("Recipe is not a valid Python program.") from exc
-        entries = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run"]
-        if len(entries) != 1:
-            raise ContractError("Recipe must define exactly one top-level run(inputs, output, params, context).")
-        args = entries[0].args
-        if (len(args.posonlyargs) + len(args.args) != 4 or args.vararg or args.kwarg or args.kwonlyargs
-                or args.defaults):
-            raise ContractError("run must accept four positional arguments, without defaults or variadic arguments.")
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                roots = [alias.name.split(".")[0] for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                if node.level or not node.module:
-                    raise ContractError("Relative imports are not supported in recipes.")
-                roots = [node.module.split(".")[0]]
-            else:
-                continue
-            if any(name not in sys.stdlib_module_names for name in roots):
-                raise ContractError("This runtime only provides Python standard-library imports.")
+        shell = data.get("kind", "python") == "shell"
+        if data["schema_version"] == 2:
+            if shell:
+                if data["code"] or data["fallback_reason"]:
+                    raise ContractError("A shell recipe has empty code and fallback_reason fields.")
+                validate_pipeline(data["pipeline"], len(data["inputs"]), data["parameters"])
+            elif data["pipeline"] or not data["fallback_reason"].strip():
+                raise ContractError("Python fallback needs an empty pipeline and a specific fallback_reason.")
+        if not shell:
+            _validate_python(data["code"])
         for item in data["inputs"]:
             if (item["kind"] == "directory") != (item["format"] == "directory"):
                 raise ContractError("Directory input kind and format must agree.")
         for item in [*data["inputs"], data["output"]]:
             if item["required_columns"] and item["format"] not in {"csv", "tsv"}:
                 raise ContractError("required_columns applies only to CSV/TSV contracts.")
-        if not any(case["expected_output"] is not None for case in data["tests"]):
+        if (not shell or data["tests"]) and not any(
+            case["expected_output"] is not None for case in data["tests"]
+        ):
             raise ContractError("At least one fixture must have an expected successful output.")
         for case in data["tests"]:
             names = set()
@@ -103,6 +93,18 @@ class Recipe:
         return self._document["code"]
 
     @property
+    def is_shell(self) -> bool:
+        return self._document.get("kind", "python") == "shell"
+
+    @property
+    def pipeline(self) -> list[dict[str, Any]]:
+        return deepcopy(self._document.get("pipeline", []))
+
+    @property
+    def fallback_reason(self) -> str:
+        return self._document.get("fallback_reason", "")
+
+    @property
     def description(self) -> str:
         return self._document["description"]
 
@@ -148,3 +150,30 @@ def validate_relative_path(value: str) -> None:
     if (not value or path.is_absolute() or any(part in {"", ".", ".."} for part in value.split("/"))
             or "\\" in value or "\x00" in value):
         raise ContractError("Fixture path must be a nonempty, non-traversing relative POSIX path.")
+
+
+def _validate_python(code: str) -> None:
+    """Check the fallback's interface; operating-system confinement is still mandatory."""
+    try:
+        tree = ast.parse(code)
+        compile(tree, "<any-recipe>", "exec")
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        raise ContractError("Recipe is not a valid Python program.") from exc
+    entries = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run"]
+    if len(entries) != 1:
+        raise ContractError("Recipe must define exactly one top-level run(inputs, output, params, context).")
+    args = entries[0].args
+    if (len(args.posonlyargs) + len(args.args) != 4 or args.vararg or args.kwarg or args.kwonlyargs
+            or args.defaults):
+        raise ContractError("run must accept four positional arguments, without defaults or variadic arguments.")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots = [alias.name.split(".")[0] for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level or not node.module:
+                raise ContractError("Relative imports are not supported in recipes.")
+            roots = [node.module.split(".")[0]]
+        else:
+            continue
+        if any(name not in sys.stdlib_module_names for name in roots):
+            raise ContractError("This runtime only provides Python standard-library imports.")

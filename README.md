@@ -1,121 +1,179 @@
 # any
 
-Manufacture the missing little command, then keep the program when it proves useful.
+Turn a request into ordinary commands, then keep a useful recipe for the next run.
 
 ```bash
-any "Keep rows where CD3 is greater than 20, preserving columns and row order" \
-  -i cells.csv -o positive.csv
+any "Sort the lines and remove duplicates" -i words.txt -o unique.txt -v
 ```
 
-`any` turns a request into an inspectable Python recipe, checks synthetic fixtures,
-runs the program inside an operating-system boundary, validates its staged result,
-and publishes only the explicitly authorized output. A matching cached request
-reuses the program, not yesterday's results or yesterday's permissions.
+`any` prefers a native command or Bash pipeline. It discovers supported installed
+commands, gives that information to your existing Sheetbend model, and allows bounded
+planning rounds for lookups and corrections. A small Python standard-library program
+is a fallback when the available commands cannot express the task correctly.
 
-**Experimental first release.** The permission checks and execution adapters are
-implemented, but this is not an independently audited security product. Start with
-synthetic/non-sensitive data and run `any --doctor` on the actual deployment.
-Do not treat a passing fixture or boundary canary as proof of semantic correctness
-or immunity to operating-system vulnerabilities. See [the security contract](docs/security.md).
+The accepted recipe runs inside an operating-system boundary, with read-only inputs
+and one staged result. Trusted code validates and publishes that result. A matching
+cached request reuses the implementation, with fresh permissions and current input
+checks on every invocation.
 
 The repository is `any`; the distribution is `sheetbend-any`, its import package
-is `sheetbend_any`, and the executable is **`any`**. The distribution name is not a
-claim that anything has been published or reserved on a package index.
+is `sheetbend_any`, and the executable is **`any`**. Version 0.2 adds native pipelines
+and keeps compatibility with explicit version-1 Python recipes. This remains an
+experimental implementation, not an independently audited security product. See
+[the execution contract](docs/security.md) and [the test and debugging guide](docs/testing.md).
 
-## Install
+## Install with current Sheetbend
 
-Python **3.13+**, Linux or macOS. Use your current Sheetbend 0.5 checkout/release.
-With the two repositories beside one another:
+Python **3.13+**, Linux or macOS. Keep your existing Sheetbend 0.5 configuration and
+checkout. With the two repositories beside one another:
 
 ```bash
-mamba create -n any_env -c conda-forge python=3.13 pip
-mamba activate any_env
 python -m pip install -e '../sheetbend[llm]'
 python -m pip install -e '.[dev]'
 any --version
 ```
 
-The Linux execution adapter additionally requires **Bubblewrap (`bwrap`) with
-`--size` support** and the native **`libseccomp.so.2`** library. Install those through
-your system package manager. `any` never installs system packages itself. A missing
-or unsupported backend fails closed; it does not fall back to `subprocess` on the
-unrestricted host.
+No Sheetbend code change or new connection registry is required. Integration uses
+`Registry.from_file`, source selection, `connect(requires={"json_schema"})`, and
+`model.prompt(..., schema=..., stream=False)`. The planning loop runs in `any`; it
+does not require provider-native function calling. Transport failures stop the
+invocation rather than silently retrying or selecting another source.
 
-On macOS the adapter uses `/usr/bin/sandbox-exec` with a default-deny profile.
-There is no Docker service or second language runtime to configure. This native
-macOS adapter requires validation on the target Python distribution and OS version;
-its availability is not a security certification.
+Linux requires Bubblewrap (`bwrap`) with `--size` support, `libseccomp.so.2`, and Bash
+for native pipelines. System tools are discovered from absolute `PATH` entries.
+`any` does not install packages or run tool binaries to probe their versions.
+Unsupported runtimes fail closed. On macOS, the adapter uses `/usr/bin/sandbox-exec`;
+actual behavior must be checked on the target OS and Python distribution.
 
 ```bash
-any --doctor
+any --list-tools
+any --doctor -vv
 ```
 
-The doctor uses only synthetic canaries. It checks a result round-trip, denied
-reads/writes, networking, hard-link creation, and subprocess creation. It does not
-contact Sheetbend. A failure must be fixed, not bypassed with an unsafe mode.
+`--list-tools` reports metadata only: presence, selected path, platform, and known
+usage notes. `features_verified: false` means flags were not probed. The doctor uses
+synthetic data to test Python and native-pipeline confinement; it never contacts a
+model. A failed boundary check must be resolved before execution.
 
-## First smoke test, without a model
+## Start without a model
 
-The repository includes a human-authored CSV recipe and tiny data file:
+The included native recipe runs `sort` followed by `uniq`:
+
+```bash
+any --recipe-file examples/sort-unique.recipe.json \
+  -i examples/words.txt -o - --dry-run -vv --no-cache
+
+any --recipe-file examples/sort-unique.recipe.json \
+  -i examples/words.txt -o - --check --no-cache
+
+any --recipe-file examples/sort-unique.recipe.json \
+  -i examples/words.txt -o - -v --no-cache
+```
+
+The last command writes only this result to stdout:
+
+```text
+alpha
+beta
+```
+
+`-v` writes the actual Bash payload and its input bindings to stderr. The payload
+contains quoted, resolved paths and pipeline-status checks. On Linux its input paths
+are sandbox paths; a host-bound preview is labeled separately. Copying the payload
+outside `any` does not reproduce its confinement or publication rules.
+
+The version-1 Python example remains available:
 
 ```bash
 any --recipe-file examples/filter-cd3.recipe.json \
-  -i examples/cells.csv -o - --dry-run --no-cache
-
-any --recipe-file examples/filter-cd3.recipe.json \
-  -i examples/cells.csv -o - --check --no-cache
-
-any --recipe-file examples/filter-cd3.recipe.json \
-  -i examples/cells.csv -o - --no-cache
+  -i examples/cells.csv -o - -v --no-cache
 ```
 
-The executed result is:
+## Generate and diagnose a recipe
 
-```csv
-cell_id,CD3,note
-003,22,positive
-004,41,positive
-```
-
-`--check` runs the synthetic fixtures, not the operation on your real inputs.
-`--dry-run` executes neither the program nor its fixtures. Both modes still bind
-and validate the supplied input/output contract.
-
-## Generate a utility
-
-Connection details remain in Sheetbend's existing configuration. There is no
-additional endpoint registry, credential store, source-health probe, or model
-fallback. The selected model must declare `json_schema` support. Its configured
-reasoning default is respected; `--reasoning` explicitly overrides that choice.
-
-**Only local processing is allowed by default.** `--allow-institutional` and
-`--allow-external` add their respective scopes, after local in selection priority.
-An explicit `--source` remains subject to that allow-list. A failed local request
-is not retried through another source.
+Use your configured local source and model, optionally selected with `--source`,
+`--model`, and `--config-path`. The model must declare `json_schema` support in
+Sheetbend. Its configured reasoning default is respected; `--reasoning` is an
+explicit override.
 
 ```bash
-any "Keep rows where CD3 is greater than 20. Fail on invalid numeric values. \
-Preserve all columns and row order. Write CSV" \
-  -i examples/cells.csv -o positive.csv --dry-run
+# Model/contract diagnosis without requiring a working execution boundary.
+any "Sort the lines and remove duplicates" \
+  -i examples/words.txt -o - --plan-only --regenerate -vv
 
-# Reuses the prepared candidate, then tests and runs it.
-any "Keep rows where CD3 is greater than 20. Fail on invalid numeric values. \
-Preserve all columns and row order. Write CSV" \
-  -i examples/cells.csv -o positive.csv -v
+# Reuse that candidate and check actual IO plus the execution boundary.
+any "Sort the lines and remove duplicates" \
+  -i examples/words.txt -o - --dry-run -vv
+
+# Reuse, check fixtures when present, execute, validate, and publish.
+any "Sort the lines and remove duplicates" \
+  -i examples/words.txt -o - -v
 ```
 
-One generation request produces a schema-validated candidate. There is no automatic
-repair loop. A failed cached program does not silently change its implementation.
-Use `--regenerate` deliberately when a new candidate is appropriate.
+Keep task text and selection options identical when testing cache reuse.
+`--planning-attempts` defaults to 4, with a maximum of 8. A round can request command
+metadata or submit a candidate. Invalid JSON, contracts, unavailable commands, and
+unsupported options produce bounded feedback for the next round. No candidate is
+executed during planning. An execution failure does not change the accepted recipe;
+use `--regenerate` deliberately for a new candidate.
 
-Only bounded input previews are sent during generation: at most `--sample-bytes`
-per file, at most 32 immediate names per directory, and a combined preview budget
-of 16 KiB. `--sample-bytes 0` sends root names/kinds/sizes, but no file contents or
-child directory names. The task text itself is also sent. Allowing a nonlocal scope
-therefore explicitly permits these request details to reach that configured source.
+Only local sources are allowed by default. `--allow-institutional` and
+`--allow-external` add those scopes after local in selection priority. An explicit
+`--source` remains subject to that allow-list. No failed request crosses a scope
+boundary automatically.
 
-The full operation processes the actual bound inputs in ordinary Python. A model's
-preview is never substituted for a filesystem listing or full-table computation.
+Generation sends the task, input metadata, and bounded previews: at most
+`--sample-bytes` per file, 32 immediate names per directory, and 16 KiB total preview
+content. `--sample-bytes 0` sends metadata without file contents or child names.
+The actual operation always uses the full bound inputs.
+
+## Inspection and verbosity
+
+| Option | Behavior |
+| --- | --- |
+| Default | Quiet success; requested result only on stdout. |
+| `-v` | Actual accepted computation on stderr, including resolved Bash bindings or fallback Python. |
+| `-vv` | Also show dependency versions, source/model/scope, reasoning, planning rounds, validation feedback, bound plan, and sandbox launch diagnostics. |
+| `-vvv` | Also show bounded rejected model responses, selected provider error fields, and failure tracebacks. Logs may contain input data. |
+| `--plan-only` | Prepare/display a candidate and check input readability; no sandbox probe, output-parent write probe, fixtures, task execution, or publication. |
+| `--dry-run`, `--dryrun` | Prepare/display; open declared input roots; probe output-parent creation/publication operations with private files; run trusted boundary/readability probes. Never execute the candidate or its fixtures. |
+| `--check` | Run supplied synthetic fixtures through the real boundary. A shell recipe with no fixtures reports zero and performs trusted boundary preflight. Never perform the task on real input data. |
+| `--history` | Show the last 100 successful cached run receipts, including the executed payload. No inference. |
+
+Plans and diagnostic output go to stderr. Explicit inspection commands (`--doctor`,
+`--list-tools`, `--history`, `--list-recipes`, `--check`) return their JSON report on
+stdout. Capture a failing diagnostic run with `2> any-debug.log`. Headers and complete
+provider requests are not logged; recognizable credentials are redacted, but model
+responses and paths can still contain sensitive content. Review logs before sharing.
+
+Dry-run probes never open the real output for writing. They do create and remove
+private files in its parent. They cannot guarantee later success under changed
+permissions, target-specific restrictions, disk exhaustion, or concurrent changes.
+Directory-root readability does not prove that every descendant is readable.
+
+## Supported command shape
+
+A shell recipe is a list of argument-vector stages connected by pipes. Each argument
+is a literal string or a whole input/parameter/time reference. The coordinator binds
+those references and quotes them before constructing the actual Bash payload. There
+is no model-authored `eval`, shell interpolation, redirect, loop, or background syntax.
+
+The initial catalog covers `cat`, `sort`, `uniq`, `cut`, `wc`, `head`, `tail`, `grep`,
+`sed`, `tr`, `comm`, `join`, `find`, `awk`, `jq`, `mlr`, and `printf`. Only installed
+commands are available. Bash is the trusted pipeline runtime, not a selectable stage.
+The catalog rejects known incompatible effects such as in-place writes, `sort -o`,
+`find -exec`, and indefinite `tail -f`; it is not a substitute for OS confinement.
+
+Pipeline failures are checked per stage. A normal `grep` no-match is an empty result;
+expected upstream SIGPIPE for supported early consumers is handled explicitly.
+Native processing uses `LC_ALL=C`. GNU/BSD differences and unprobed flags remain
+possible failures. The planner should use format-aware tools: `awk -F,` does not
+correctly parse general quoted CSV. When a clear native solution is unavailable,
+a justified Python fallback is preferable to incorrect parsing.
+
+A Python fallback must include a reason and at least one successful synthetic fixture.
+Shell fixtures are optional. A passing model-authored fixture is useful evidence,
+not proof of semantic correctness.
 
 ## Output authority
 
@@ -126,139 +184,85 @@ preview is never substituted for a filesystem listing or full-table computation.
 | `-o result.csv --overwrite` | Replace that exact output file. |
 | `-i file.csv -o file.csv --modify file.csv` | Explicitly replace that input through staging. |
 
-Input modification is **not** enabled by `--overwrite`, including when an output
-aliases an input. Task text such as "overwrite whatever you need" grants nothing.
-Final-component symlinks, devices, FIFOs, and multiply linked output files are
-rejected. Output parents must already exist.
+`--overwrite` never grants input modification. Task text grants no filesystem
+permissions. Final-component symlinks, devices, FIFOs, and multiply linked output
+files are rejected. Output parents must already exist; outputs inside input directory
+grants are rejected. There is one output file, with no general deletion, bulk rename,
+append, or multi-file transaction mode.
 
-Even with modification permission, the worker sees read-only originals. It writes
-one private candidate; trusted publication code handles replacement. The original
-file is not opened for writing by generated code.
-
-The first release supports one output file, not a writable output directory.
-Destinations inside an input directory are deliberately rejected. Deletion,
-in-place append, bulk rename/move, and multi-file change plans are not implemented.
-
-**Shell redirection is outside this policy.** In `any ... -o - > result.csv`, the
-calling shell manages `result.csv` before `any` runs. Use `-o result.csv` for `any`'s
-no-overwrite protection. Bytes already written to another process cannot be recalled.
+Even with `--modify`, originals stay read-only in the worker. Trusted publication
+handles replacement. With `any ... -o - > result.csv`, the calling shell owns that
+redirection; use `-o result.csv` for `any`'s no-overwrite protection.
 
 ## Save and replay
 
 ```bash
-any --recipe-file examples/filter-cd3.recipe.json \
-  -i examples/cells.csv -o - --save-recipe filter-cd3
+any --recipe-file examples/sort-unique.recipe.json \
+  -i examples/words.txt -o - --save-recipe unique-lines
 
-any --recipe filter-cd3 \
-  -i another-table.csv -o another-positive.csv --param threshold 30
-
+any --recipe unique-lines -i another.txt -o another-unique.txt -v
 any --list-recipes
+any --history
 ```
 
-A saved name identifies immutable code, contracts, defaults, and tests. It does not
-identify permanent file permissions. Changing a saved name's program is refused;
-choose a new name. `--recipe` accepts a literal name or full SHA-256 digest, never
-fuzzy matching or an ambiguous digest prefix. `--recipe-file` is a separate,
-explicit origin for an externally supplied recipe document; it is still untrusted
-code and uses the same boundary.
+Names identify immutable recipes, never permanent file permissions. A different
+implementation needs a new name. `--recipe` accepts a literal name or full SHA-256
+digest; `--recipe-file` explicitly imports a recipe subject to the same confinement.
 
-For automatic cache lookup, the exact task, ordered canonical input paths, output
-suffix hint, inspection setting, and explicit compiler-selection settings form the
-key. Output directories, replacement permission, and run-time parameter values are
-not authority carried by that key. Changing data at the same input path reuses the
-program; input kinds and required columns are validated again. Named recipes are
-how to deliberately reuse a utility on different paths.
+Automatic lookup uses the exact task, ordered canonical input paths, output suffix,
+inspection settings, and explicit compiler choices. Changed data at the same path
+reuses the implementation after fresh contract checks. Cache hits make no model
+request. Fixture qualification is bound to the recipe, selected tool identities,
+and observed runtime fingerprint. Every execution still establishes the boundary
+and checks its canaries. A changed selected executable invalidates a prepared plan.
 
-A cache hit makes **no model request**. Fixture qualification is reused only for the
-same recipe and observed runtime fingerprint. `--check` explicitly retests. Every
-real worker still establishes its OS boundary and runs the boundary canaries.
-
-Relative dates use the invocation's recorded `context['now']`; `--as-of` fixes that
-value for a replay. Programs are instructed to use that value rather than the live
-clock. This instruction is not a proof that arbitrary generated code is time-pure.
-Prefer explicit cutoff timestamps for important analyses.
-
-## Terminal behavior
-
-Default success is quiet, apart from the requested stdout result. `-v` reports useful
-execution stages on stderr. `-vv` adds the bound contract and actual program. There
-is no routine "sending to Sheetbend" narration, explanation mixed into data, or
-automatic printing of raw shell commands after a permission failure.
-
-A preview includes both the actual Python program and its binding contract. It is
-not a bare shell command: running the program yourself outside `any` would not
-preserve the execution or publication boundary.
+Relative dates use recorded `context['now']`; `--as-of` fixes it for replay. This is
+an instruction and binding facility, not a proof of arbitrary program time-purity.
 
 ## Library stages
 
 ```python
 from pathlib import Path
-from sheetbend_any import Engine, Recipe, RecipeStore, Request, Sandbox, Plan
+from sheetbend_any import Engine, Plan, Recipe, Request, Sandbox
 
-request = Request.bind(
-    None,
-    input_paths=["examples/cells.csv"],
-    output_path="positive.csv",
-)
-recipe = Recipe.from_json(Path("examples/filter-cd3.recipe.json").read_bytes())
+request = Request.bind(None, input_paths=["examples/words.txt"], output_path="unique.txt")
+recipe = Recipe.from_json(Path("examples/sort-unique.recipe.json").read_bytes())
 plan = Plan.bind(request, recipe)
-engine = Engine(store=RecipeStore(), sandbox=Sandbox())
+engine = Engine(store=None, sandbox=Sandbox())
 
-print(plan.preview())         # Does not execute code or tests.
-report = engine.check(plan)   # Synthetic fixtures only.
+print(plan.preview())       # Does not execute the candidate or fixtures.
+engine.preflight(plan)      # Trusted IO and boundary probes only.
+report = engine.check(plan) # Synthetic fixtures only.
 receipt = engine.execute(plan)
 ```
 
-For generation, construct `Request.bind("your task", ...)` and use
-`engine.prepare(request)`. `SheetbendCompiler` exposes explicit source settings.
-`Engine(store=None)` disables persistence. For stdout, bind `output_path="-"` and
-supply a binary stream to `engine.execute(plan, stdout=stream)`.
-
-`Sandbox.execute()` is a context manager exposing a staged result, and
-`testing.check_recipe`, `inspection.inspect_inputs`, `output.validate_output`, and
-`output.publish_output` are meaningful individual workflow stages. A staged path
-must be consumed inside its context. The CLI calls these same implementations.
+For generation use `Request.bind("task", ...)` and `engine.prepare(request)`.
+`Sandbox.execute_shell()` and `Sandbox.execute()` expose staged results through
+context managers; consume them before their contexts close. `testing.check_recipe`,
+`inspection.inspect_inputs`, `output.validate_output`, and `output.publish_output`
+remain independent stages. The CLI uses these same implementations.
 
 ## State and limits
 
-Recipe storage defaults to `${XDG_CACHE_HOME:-$HOME/.cache}/any`; override with
-`--cache-directory`. Its directory is private (0700) and its SQLite database is
-private (0600). At most 256 unnamed recipes and 100 run receipts are retained;
-named recipes are not automatically evicted. Receipts record paths, metadata
-identities, parameters, timestamps, runtime identity, and the output checksum.
-Inputs are **not** content-hashed or snapshotted by default.
+State remains in `${XDG_CACHE_HOME:-$HOME/.cache}/any`, configurable with
+`--cache-directory`. Its directory/database are private (0700/0600). Up to 256 unnamed
+recipes and 100 run receipts are retained; named recipes are not automatically
+removed. History is cache state, not a permanent audit log under `.config`.
+`--no-cache` disables all `any` cache reads/writes and receipts. Sheetbend owns its
+separate runtime ledger. Generated code/descriptions can contain input data; this
+plaintext cache is not a secret vault.
 
-Raw previews and prompts are not separately stored, but generated code/descriptions
-can themselves contain sensitive text. The cache is not encrypted and is not a
-secret vault. `--no-cache` disables `any` cache reads/writes and run receipts;
-Sheetbend still owns its separate, content-free runtime ledger.
+Defaults per worker: 30 seconds, 512 MiB memory, 64 MiB output/per-file size, 128 MiB
+scratch, and a supervised 64-process cap. Native tools with large virtual-memory
+reservations can require an explicit higher `--memory-mib`. No limit is relaxed
+automatically. See [security details](docs/security.md) for hard versus supervised
+limits. These settings do not control Sheetbend's queue or provider timeout.
 
-Private workspaces are automatically cleaned and can be placed under an existing
-`--temporary-directory`. Publication briefly creates a private file in the authorized
-output's parent. Abrupt process/host termination can leave temporary files; ordinary
-failures and cancellation have cleanup paths. Do not place private workspaces beneath
-an input directory that grants the worker access to them.
-
-Defaults per worker: 30 seconds, 512 MiB memory, 64 MiB per-file/output size, and
-128 MiB scratch. See `--help` for overrides and [security details](docs/security.md)
-for hard versus supervised limits. These do not control Sheetbend's request queue or
-provider timeout.
-
-## First-release scope
-
-The useful center is file inventories, hashes, CSV/TSV transformations and comparisons,
-JSON/text reports, and log extraction using Python's standard library. No Bash,
-third-party Python environment, package installation, network-enabled worker, or
-raw host-command escape hatch is provided.
-
-Fixture expectations currently compare exact UTF-8 output (or an expected error).
-Binary output publication is byte-preserving, but these fixtures do not yet cover
-arbitrary ZIP/image artifacts conveniently. JSON result validation is limited to
-8 MiB; CSV/text validation and hashing stream. CSV parsing retains Python's default
-field-size bound. These limits fail explicitly rather than skipping validation.
-
-A passing self-authored test suite is evidence, **not an independent correctness
-oracle**. Review scientific transformations and any program that will replace data.
+JSON output validation is limited to 8 MiB; text/table validation and hashing stream.
+CSV parsing retains Python's default field-size bound. Fixture expectations compare
+exact UTF-8 output or an ordinary program failure. Binary output remains byte-preserving,
+but binary fixtures are not yet convenient. No third-party Python packages, package
+installation, network-enabled worker, or unrestricted host-command mode are provided.
 
 ## Development
 
@@ -267,13 +271,10 @@ python -m pip install -e '.[dev]'
 pytest
 ruff check .
 python -m pip wheel --no-deps --wheel-dir dist .
-
-# Strict deployment/release gates: unavailable integration is a failure.
 ANY_REQUIRE_SANDBOX=1 ANY_REQUIRE_INFERENCE=1 pytest
 ```
 
-Tests distinguish orchestration doubles, actual native syscall-filter checks, actual
-OS confinement tests, and the real Sheetbend/LLM/SDK protocol against a loopback test
-server. None is a benchmark of a local model's ability to write correct programs.
-CI is configured for Linux/macOS and Python 3.13/3.14, with strict integration gates.
-The API is experimental; the existing Apache-2.0 license is unchanged.
+The strict gates turn unavailable integration into failures. Tests distinguish
+orchestration doubles, actual native confinement, and the real Sheetbend/LLM/SDK
+protocol against a loopback test server. They do not test the quality or availability
+of your configured live model. See [recommended commands](docs/testing.md).

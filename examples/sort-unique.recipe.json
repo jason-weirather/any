@@ -1,0 +1,48 @@
+{
+  "schema_version": 2,
+  "kind": "shell",
+  "description": "Return unique complete lines in bytewise sorted order.",
+  "code": "",
+  "pipeline": [
+    {
+      "argv": [
+        "sort",
+        {
+          "input": 0
+        }
+      ]
+    },
+    {
+      "argv": [
+        "uniq"
+      ]
+    }
+  ],
+  "fallback_reason": "",
+  "inputs": [
+    {
+      "kind": "file",
+      "format": "text",
+      "required_columns": []
+    }
+  ],
+  "output": {
+    "format": "text",
+    "required_columns": []
+  },
+  "parameters": {},
+  "tests": [
+    {
+      "name": "sort and remove duplicate lines",
+      "files": [
+        {
+          "input_index": 0,
+          "path": "",
+          "content": "beta\nalpha\nbeta\n"
+        }
+      ],
+      "parameters": {},
+      "expected_output": "alpha\nbeta\n"
+    }
+  ]
+}

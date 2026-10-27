@@ -49,26 +49,27 @@ def backend_name() -> str:
         return "bubblewrap-seccomp"
     if sys.platform == "darwin":
         return "macos-seatbelt"
-    raise SandboxError("Execution supports Linux and macOS only; --dry-run remains available.")
+    raise SandboxError("Execution supports Linux and macOS only; --plan-only remains available.")
 
 
 def require_backend() -> Path:
     if sys.platform.startswith("linux"):
         selected = shutil.which("bwrap")
         if selected is None:
-            raise SandboxError("Execution requires Bubblewrap (bwrap) and libseccomp on Linux. No unsandboxed fallback. Use --dry-run to preview.")
+            raise SandboxError("Execution requires Bubblewrap (bwrap) and libseccomp on Linux. No unsandboxed fallback. Use --plan-only to preview.")
         return Path(selected).resolve()
     if sys.platform == "darwin":
         selected = Path("/usr/bin/sandbox-exec")
         if selected.is_file():
             return selected
-        raise SandboxError("macOS sandbox-exec is unavailable. No unsandboxed fallback. Use --dry-run.")
-    raise SandboxError("Execution supports Linux and macOS only; use --dry-run.")
+        raise SandboxError("macOS sandbox-exec is unavailable. No unsandboxed fallback. Use --plan-only to preview.")
+    raise SandboxError("Execution supports Linux and macOS only; use --plan-only to preview.")
 
 
 def linux_command(
     executable: Path, *, control: Path, work: Path, output: Path,
-    inputs: list[Path], scratch_bytes: int,
+    inputs: list[Path], scratch_bytes: int, shell_executables: tuple[Path, ...] = (),
+    runtime_files: tuple[Path, ...] = (),
 ) -> tuple[list[str], list[str], str, str]:
     """Construct a new read-only root, read-only inputs, one writable file, bounded tmpfs."""
     python = Path(sys.executable).resolve()
@@ -78,6 +79,9 @@ def linux_command(
     for root in roots:
         command.extend(["--ro-bind", str(root), str(root)])
     command.extend(["--ro-bind", str(python), str(python)])
+    for path in dict.fromkeys((*shell_executables, *runtime_files)):
+        if not any(path.is_relative_to(root) for root in roots):
+            command.extend(["--ro-bind", str(path), str(path)])
     for path in blocked:
         if any(path.is_relative_to(root) for root in roots):
             command.extend(["--size", "4096", "--tmpfs", str(path), "--remount-ro", str(path)])
@@ -98,7 +102,7 @@ def linux_command(
         "--size", str(scratch_bytes), "--perms", "0700", "--tmpfs", "/work",
         "--chdir", "/work", "--remount-ro", "/",
     ])
-    environment = worker_environment("/work")
+    environment = worker_environment("/work", shell=bool(shell_executables))
     for key, value in environment.items():
         command.extend(["--setenv", key, value])
     command.extend(["--", str(python), "-S", "-s", "-P", "-B", "/control/worker.py", "/control/task.json"])
@@ -112,24 +116,31 @@ def _filter(path: Path, *, directory: bool) -> str:
     return f"({'subpath' if directory else 'literal'} {json.dumps(value, ensure_ascii=False)})"
 
 
-def macos_profile(control: Path, work: Path, output: Path, inputs: list[Path]) -> str:
-    """Default deny, no network or IPC, no fork, only the interpreter may be executed.
+def macos_profile(
+    control: Path, work: Path, output: Path, inputs: list[Path], *,
+    shell_executables: tuple[Path, ...] = (), runtime_files: tuple[Path, ...] = (),
+) -> str:
+    """Default deny with explicit read/write paths and no network or service IPC.
 
-    The worker tests hard-link and process creation denial before touching user
-    code. Missing policy support is an execution failure, not an allow-all mode.
+    Python mode denies forks and permits only its interpreter. Shell mode allows
+    confined children and the exact selected executables. Boundary canaries run
+    before task code, including inherited denials in a shell-mode child. Missing
+    policy support fails execution; it never selects an allow-all mode.
     """
     roots, blocked = runtime_paths()
     python = Path(sys.executable).resolve()
     read = [*(_filter(path, directory=True) for path in roots),
             _filter(python, directory=False), _filter(control, directory=True),
             _filter(work, directory=True), _filter(output, directory=False),
+            *(_filter(path, directory=False) for path in (*shell_executables, *runtime_files)),
             *(_filter(path, directory=path.is_dir()) for path in inputs)]
+    executables = [python, *shell_executables]
     profile = [
         "(version 1)", "(deny default)",
         # macOS may abort the sandboxed process at launch unless it can read
         # the root directory node. A literal grant does not expose descendants.
         '(allow file-read* (literal "/"))',
-        f"(allow process-exec {_filter(python, directory=False)})",
+        f"(allow process-exec {' '.join(_filter(path, directory=False) for path in executables)})",
         "(allow process-info* (target self))",
         "(allow sysctl-read)",
         f"(allow file-read* {' '.join(read)})",
@@ -139,22 +150,30 @@ def macos_profile(control: Path, work: Path, output: Path, inputs: list[Path]) -
         '(allow file-read-data (literal "/dev/urandom") (literal "/dev/random"))',
     ]
     # Traversing parents needs metadata, not directory listings or file contents.
-    ancestors = {parent for path in [python, control, work, output, *inputs, *roots]
-                 for parent in path.resolve().parents}
+    ancestors = {parent for path in [*executables, *runtime_files, control, work, output, *inputs, *roots]
+                 for parent in (*path.parents, *path.resolve().parents)}
     profile.append(f"(allow file-read-metadata {' '.join(_filter(path, directory=False) for path in sorted(ancestors))})")
     for path in blocked:
         profile.append(f"(deny file-read* {_filter(path, directory=True)})")
     # Do not rely on rule-order subtleties for these absolute denials.
-    profile.extend(["(deny process-fork)", "(deny network*)", "(deny system-socket)"])
+    profile.extend([
+        "(allow process-fork)" if shell_executables else "(deny process-fork)",
+        "(deny network*)", "(deny system-socket)",
+    ])
     return "\n".join(profile) + "\n"
 
 
-def worker_environment(work: str) -> dict[str, str]:
+def worker_environment(work: str, *, shell: bool = False) -> dict[str, str]:
     """An allow-list, not a copy of the coordinator's environment."""
-    return {
+    environment = {
         "PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work,
         "LANG": "C.UTF-8" if sys.platform.startswith("linux") else "en_US.UTF-8",
         "LC_ALL": "C.UTF-8" if sys.platform.startswith("linux") else "en_US.UTF-8",
         "TZ": "UTC", "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
     }
+    if shell:
+        # No BASH_ENV, ENV, shell functions, loader overrides, credentials, or user
+        # configuration. A fixed bytewise locale also avoids hidden locale data.
+        environment.update({"LANG": "C", "LC_ALL": "C"})
+    return environment

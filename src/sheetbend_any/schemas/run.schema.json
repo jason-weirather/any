@@ -21,7 +21,10 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "recipe_digest": {
       "type": "string",
@@ -95,7 +98,7 @@
     },
     "tests_passed": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 0
     },
     "fixture_cache_hit": {
       "type": "boolean"
@@ -108,10 +111,40 @@
     },
     "published": {
       "type": "boolean"
+    },
+    "execution_kind": {
+      "enum": [
+        "shell",
+        "python"
+      ]
+    },
+    "command": {
+      "type": "string"
+    },
+    "tools": {
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sheetbend-any:run:1",
-  "title": "Completed run receipt, version 1",
-  "description": "Input identities are metadata observations, not content hashes or recursive snapshots. published=false denotes a staged result not yet sent to the destination."
+  "$id": "urn:sheetbend-any:run:2",
+  "title": "Run contract, versions 1 and 2",
+  "description": "Input identities are metadata observations, not content hashes or recursive snapshots. published=false denotes a staged result not yet sent to the destination.",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "execution_kind",
+          "command",
+          "tools"
+        ]
+      }
+    }
+  ]
 }
