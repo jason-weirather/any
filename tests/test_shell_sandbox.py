@@ -319,3 +319,94 @@ def test_real_native_pipeline_timeout_never_yields(shell_sandbox):
     with pytest.raises(ExecutionError, match="time limit|status"):
         with sandbox.execute_shell(pipeline, inputs=[], parameters={}, context={}):
             pytest.fail("Unfinished pipeline yielded a staged result")
+
+
+def test_macos_visible_inputs_match_exact_policy_grants_through_symlink(tmp_path):
+    """Regression for /var -> /private/var style aliases on macOS."""
+    from sheetbend_any._sandbox.platforms import macos_visible_inputs
+
+    real = tmp_path / "real"
+    real.mkdir()
+    source = real / "input.txt"
+    source.write_text("one\n")
+    alias = tmp_path / "var"
+    alias.symlink_to(real, target_is_directory=True)
+    selected = macos_visible_inputs([alias / "input.txt"])
+    assert selected == [source]
+
+    control, work = tmp_path / "control", tmp_path / "work"
+    control.mkdir()
+    work.mkdir()
+    result = tmp_path / "result"
+    result.touch()
+    policy = macos_profile(control, work, result, selected)
+    assert f'(literal "{source}")' in policy
+    assert f'(literal "{alias / "input.txt"}")' not in policy
+    assert f'(subpath "{real}")' not in policy
+    assert f'(subpath "{tmp_path}")' not in policy
+
+
+def test_macos_metadata_for_executable_symlinks_is_exact_only(tmp_path):
+    real = tmp_path / "real" / "cat"
+    real.parent.mkdir()
+    real.write_bytes(b"binary")
+    alias = tmp_path / "bin" / "cat"
+    alias.parent.mkdir()
+    alias.symlink_to(real)
+    control, work = tmp_path / "control", tmp_path / "work"
+    control.mkdir()
+    work.mkdir()
+    result = tmp_path / "result"
+    result.touch()
+    profile = macos_profile(control, work, result, [], shell_executables=(alias,))
+    assert f'(literal "{real}")' in profile
+    assert f'(literal "{alias}")' in profile
+    assert f'(subpath "{alias.parent}")' not in profile
+
+
+@pytest.mark.parametrize("kind", ["python", "shell"])
+def test_mac_worker_receives_same_real_path_as_policy(tmp_path, monkeypatch, kind):
+    """Simulated macOS wiring test; no claim about native Seatbelt enforcement."""
+    import sheetbend_any.sandbox as sandbox_module
+    import json
+
+    real = tmp_path / "private" / "var"
+    real.mkdir(parents=True)
+    source = real / "input.txt"
+    source.write_text("payload\n")
+    var_alias = tmp_path / "var"
+    var_alias.symlink_to(real, target_is_directory=True)
+    aliased_source = var_alias / "input.txt"
+
+    captures = []
+
+    def fake_supervise(command, *, env, cwd, work, limits):
+        task = Path(command[-1])
+        payload = json.loads(task.read_text())
+        policy = (task.parent.parent / "profile.sb").read_text()
+        captures.append((payload, policy))
+        assert payload["inputs"] == [str(source)]
+        assert f'(literal "{source}")' in policy
+        assert f'(subpath "{real}")' not in policy
+        assert payload.get("mode") == ("shell" if kind == "shell" else None)
+        if kind == "shell":
+            assert str(source) in payload["script"]
+            assert str(aliased_source) not in payload["script"]
+        return b"", b"", 0.01
+
+    monkeypatch.setattr(sandbox_module, "require_backend", lambda: Path("/usr/bin/sandbox-exec"))
+    monkeypatch.setattr(sandbox_module, "_supervise", fake_supervise)
+    # Only this function's branch is simulated; actual OS confinement is tested
+    # by the macOS doctor and strict CI, not by this mock.
+    with monkeypatch.context() as patch:
+        patch.setattr(sandbox_module.sys, "platform", "darwin")
+        worker = sandbox_module.Sandbox(temporary_directory=tmp_path)
+        if kind == "shell":
+            with worker.execute_shell([{"argv": ["cat", {"input": 0}]}],
+                                      inputs=[aliased_source], parameters={}, context={}) as result:
+                assert result.path.is_file()
+        else:
+            with worker.execute("def run(inputs, output, params, context): pass",
+                                inputs=[aliased_source], parameters={}, context={}) as result:
+                assert result.path.is_file()
+    assert len(captures) == 1

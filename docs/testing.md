@@ -30,6 +30,46 @@ printf 'Test files: %s\n' "$ANY_CHECK_DIR"
 Leave it in place while investigating. Logs can contain filenames, model-generated
 content, and bounded data previews even after recognizable credentials are redacted.
 
+### macOS: keep tests in ~/Scratch/Test
+
+Put ordinary test inputs and results in `~/Scratch/Test`, and private job
+workspaces in the parent `~/Scratch`. This avoids system temp path aliases
+without disabling any sandbox checks:
+
+```bash
+mkdir -p "$HOME/Scratch/Test"
+export ANY_TEMPORARY_DIRECTORY="$HOME/Scratch"
+printf 'beta\nalpha\nbeta\n' > "$HOME/Scratch/Test/words.txt"
+any --doctor -vv
+
+any --recipe-file examples/sort-unique.recipe.json \
+  -i "$HOME/Scratch/Test/words.txt" \
+  -o "$HOME/Scratch/Test/unique.txt" --dryrun -vv
+any --recipe-file examples/sort-unique.recipe.json \
+  -i "$HOME/Scratch/Test/words.txt" \
+  -o "$HOME/Scratch/Test/unique.txt" -v
+cat "$HOME/Scratch/Test/unique.txt"
+```
+
+The last `cat` should output `alpha` and `beta`, one per line. To rerun after
+successful publication, use `--overwrite` only for that explicit output.
+`ANY_TEMPORARY_DIRECTORY` is used only by the trusted coordinator, not
+forwarded to the job. You can instead pass `--temporary-directory
+"$HOME/Scratch"` for an individual `any` invocation.
+
+The temporary workspaces are still separate, unique, mode-0700 directories
+that are removed on ordinary completion. They protect concurrent jobs and
+staging. **Do not use the workspace parent itself as a declared input
+directory** (`-i ~/Scratch`); the security check deliberately rejects that
+overlap. Using `-i ~/Scratch/Test` is fine if output is elsewhere and the
+workspace is in the sibling directory under `~/Scratch`.
+
+A macOS regression previously showed worker input `/var/folders/...` while its
+Seatbelt grant named `/private/var/folders/...`. The adapter now canonicalizes
+worker inputs to match their exact read grants and permits only **metadata**
+for required symlink traversal. It does not authorize the `/private/var`
+subtree. The actual Mac `--doctor` canary still must pass before execution.
+
 ## 2. Check the actual OS boundary without a model
 
 ```bash

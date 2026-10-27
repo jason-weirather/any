@@ -73,3 +73,26 @@ def test_saved_recipe_listing_is_offline(recipe, tmp_path):
 ])
 def test_conflicting_modes_fail_before_work(options):
     assert CliRunner().invoke(main, options).exit_code == 2
+
+
+def test_temporary_directory_envvar_reaches_doctor_without_extra_flags(tmp_path, monkeypatch):
+    import sheetbend_any.cli as cli
+    from click.testing import CliRunner
+
+    preferred = tmp_path / "work"
+    preferred.mkdir()
+    monkeypatch.setenv("ANY_TEMPORARY_DIRECTORY", str(preferred))
+    received = []
+
+    class FakeSandbox:
+        def __init__(self, **options):
+            received.append(options)
+
+        def doctor(self):
+            return {"backend": "test-double", "canaries_passed": True}
+
+    monkeypatch.setattr(cli, "Sandbox", FakeSandbox)
+    result = CliRunner().invoke(cli.main, ["--doctor"])
+    assert result.exit_code == 0, result.output
+    assert received[0]["temporary_directory"] == preferred
+    assert json.loads(result.stdout)["canaries_passed"] is True

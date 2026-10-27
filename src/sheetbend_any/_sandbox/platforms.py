@@ -1,5 +1,6 @@
 """Explicit filesystem layouts and macOS policy. Never mount an entire Python prefix."""
 
+from collections.abc import Sequence
 import json
 from pathlib import Path
 import shutil
@@ -116,6 +117,28 @@ def _filter(path: Path, *, directory: bool) -> str:
     return f"({'subpath' if directory else 'literal'} {json.dumps(value, ensure_ascii=False)})"
 
 
+def macos_visible_inputs(inputs: Sequence[Path]) -> list[Path]:
+    """Use the *same* canonical input names in Seatbelt and the worker.
+
+    On macOS, /var, /tmp and /etc may be symlink aliases into /private. A
+    literal read grant to the resolved vnode is not sufficient if the worker
+    opens a different spelling whose symlink traversal is denied. This must
+    not add a grant for the enclosing directory or other undeclared files.
+    """
+    try:
+        return [Path(path).resolve(strict=True) for path in inputs]
+    except (OSError, RuntimeError) as exc:
+        raise SandboxError("Cannot resolve a declared macOS input for the sandbox.") from exc
+
+
+def _literal_spelling(path: Path) -> str:
+    """A metadata-only rule for a symlink's spelling, not its contents."""
+    value = str(path.absolute())
+    if len(value.encode("utf-8")) > 900 or any(ord(char) < 32 for char in value):
+        raise SandboxError("Path cannot be represented safely in the macOS sandbox profile.")
+    return f"(literal {json.dumps(value, ensure_ascii=False)})"
+
+
 def macos_profile(
     control: Path, work: Path, output: Path, inputs: list[Path], *,
     shell_executables: tuple[Path, ...] = (), runtime_files: tuple[Path, ...] = (),
@@ -152,7 +175,28 @@ def macos_profile(
     # Traversing parents needs metadata, not directory listings or file contents.
     ancestors = {parent for path in [*executables, *runtime_files, control, work, output, *inputs, *roots]
                  for parent in (*path.parents, *path.resolve().parents)}
-    profile.append(f"(allow file-read-metadata {' '.join(_filter(path, directory=False) for path in sorted(ancestors))})")
+    profile.append(
+        f"(allow file-read-metadata file-test-existence "
+        f"{' '.join(_filter(path, directory=False) for path in sorted(ancestors))})"
+    )
+    # These are exact permitted files, not extra directory grants. On some
+    # macOS releases access(2) also requires file-test-existence.
+    profile.append(
+        f"(allow file-test-existence "
+        f"{' '.join(_filter(path, directory=path.is_dir()) for path in [*executables, *runtime_files, *inputs])})"
+    )
+    # Allow only metadata/existence on symlink *nodes* used in traversal.
+    # Never add file-read-data or a recursive grant for /var, /tmp, or a tool
+    # installation prefix. This also covers Homebrew's executable symlinks.
+    symlinks = {
+        part for path in [*executables, *runtime_files, control, work, output, *inputs]
+        for part in (path, *path.parents) if part.is_symlink()
+    }
+    if symlinks:
+        profile.append(
+            "(allow file-read-metadata file-test-existence "
+            + " ".join(_literal_spelling(path) for path in sorted(symlinks)) + ")"
+        )
     for path in blocked:
         profile.append(f"(deny file-read* {_filter(path, directory=True)})")
     # Do not rely on rule-order subtleties for these absolute denials.

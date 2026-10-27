@@ -50,6 +50,28 @@ any --list-tools
 any --doctor -vv
 ```
 
+### macOS: work from ~/Scratch/Test
+
+You can keep your data and results in `~/Scratch/Test`, and have `any` make
+private scratch workspaces in `~/Scratch` instead of `/var/folders/...`:
+
+```bash
+mkdir -p "$HOME/Scratch/Test"
+export ANY_TEMPORARY_DIRECTORY="$HOME/Scratch"
+any --doctor -vv
+```
+
+Alternatively pass `--temporary-directory "$HOME/Scratch"` on individual
+invocations. Jobs still use unique owner-only (0700) per-run subdirectories,
+removed after execution. They cannot overlap a directory granted as an input:
+if you explicitly pass `-i ~/Scratch`, use a different workspace parent.
+This is **not** a relaxation of network, input, or output permissions.
+
+The macOS adapter passes canonicalized paths to the worker, matching the
+Seatbelt literal grants. `/var` and `/tmp` may otherwise refer to
+`/private/var` and `/private/tmp`. No broad read permission to either location
+is added. The doctor remains mandatory before real execution.
+
 `--list-tools` reports metadata only: presence, selected path, platform, and known
 usage notes. `features_verified: false` means flags were not probed. The doctor uses
 synthetic data to test Python and native-pipeline confinement; it never contacts a

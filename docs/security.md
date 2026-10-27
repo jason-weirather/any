@@ -93,6 +93,15 @@ libraries, bootstrap files, explicit inputs, scratch, and the worker's staged re
 Read-only parent metadata supports traversal; this is not authority to list parents
 or read sibling file contents. Known site-package locations are denied.
 
+The coordinator canonicalizes each declared macOS input path before producing
+both the Seatbelt profile and the worker configuration. This avoids mismatched
+`/var` versus `/private/var` names. Ancestor and symlink-node traversal is
+metadata/existence-only; no recursive read of the parent temp directory or home
+is introduced. The same rules apply when the caller chooses a private workspace
+with `--temporary-directory` or `ANY_TEMPORARY_DIRECTORY`. Workspaces still use
+owner-only randomized per-run directories and cannot sit inside a declared
+input-directory grant. The environment setting is not forwarded to the worker.
+
 The profile does not permit network access, Unix sockets, Mach service lookup, or
 Apple Events. Python recipes deny process forking and permit only the interpreter
 executable. Native pipelines allow process forking and the selected executables;

@@ -67,7 +67,7 @@ def _parameters(values: tuple[tuple[str, str], ...]) -> dict[str, Any]:
 @click.option("--planning-attempts", type=click.IntRange(1, 8), default=4, help="Maximum structured planning rounds, including discovery and candidate repairs; never retries transport errors.")
 @click.option("--cache-directory", type=click.Path(path_type=Path), default=None, show_default="XDG_CACHE_HOME/any or ~/.cache/any")
 @click.option("--no-cache", is_flag=True, help="Disable any recipe-cache reads/writes and run receipts. Sheetbend owns its separate runtime ledger.")
-@click.option("--temporary-directory", type=click.Path(path_type=Path, exists=True, file_okay=False), help="Existing parent for automatically cleaned private workspaces.")
+@click.option("--temporary-directory", envvar="ANY_TEMPORARY_DIRECTORY", type=click.Path(path_type=Path, exists=True, file_okay=False), help="Existing parent for automatically cleaned private workspaces (or ANY_TEMPORARY_DIRECTORY).")
 @click.option("--timeout-seconds", type=click.FloatRange(min=0, min_open=True), default=_DEFAULTS.timeout_seconds, help="Worker wall-clock/CPU budget. Sheetbend owns generation timeouts.")
 @click.option("--memory-mib", type=click.IntRange(min=1), default=_DEFAULTS.memory_bytes // 1048576)
 @click.option("--output-mib", type=click.IntRange(min=1), default=_DEFAULTS.output_bytes // 1048576)

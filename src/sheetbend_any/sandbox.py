@@ -21,7 +21,7 @@ from typing import Any
 import psutil
 
 from ._sandbox.platforms import (
-    backend_name, linux_command, macos_profile, require_backend, runtime_paths, worker_environment,
+    backend_name, linux_command, macos_profile, macos_visible_inputs, require_backend, runtime_paths, worker_environment,
 )
 from ._sandbox.native import native_runtime_files
 from ._version import __version__
@@ -350,7 +350,7 @@ class Sandbox:
             if any(root.is_relative_to(path.resolve()) for path in runtime_roots):
                 raise SandboxError("Private workspace overlaps a runtime read grant. Select another --temporary-directory.")
             for path in inputs:
-                if path.is_dir() and root.is_relative_to(path):
+                if path.is_dir() and root.is_relative_to(path.resolve(strict=True)):
                     raise SandboxError("Input includes the private workspace. Select a narrower input or another --temporary-directory.")
             control, work = root / "control", root / "work"
             control.mkdir(mode=0o700)
@@ -378,11 +378,17 @@ class Sandbox:
                     visible_readonly = "/control/readonly-canary"
                 else:
                     profile = root / "profile.sb"
-                    policy = macos_profile(control, work, output, list(inputs),
+                    # Resolve the input *once*, and pass exactly the same path
+                    # spellings to both Seatbelt and worker/task.json. A worker
+                    # opening /var/... against a /private/var/... grant is not
+                    # portable across macOS versions.
+                    canonical_inputs = macos_visible_inputs(inputs)
+                    policy = macos_profile(control, work, output, canonical_inputs,
                                            shell_executables=shell_executables, runtime_files=runtime_files)
                     profile.write_text(policy, encoding="utf-8")
                     self._event("sandbox.policy", backend=backend_name(), policy=policy[:16384])
-                    visible_inputs, visible_output, visible_work = list(map(str, inputs)), str(output), str(work)
+                    visible_inputs = [str(path) for path in canonical_inputs]
+                    visible_output, visible_work = str(output), str(work)
                     visible_readonly = str(readonly)
                     command = [str(executable), "-f", str(profile), str(Path(sys.executable).resolve()),
                                "-S", "-s", "-P", "-B", str(control / "worker.py"), str(control / "task.json")]
