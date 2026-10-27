@@ -61,6 +61,15 @@ def validate_document(value: Any, name: str) -> None:
         schema = schema["$defs"][f"v{int(version)}"]
     error = next(Draft202012Validator(schema).iter_errors(value), None)
     if error is not None:
+        # The full recipe has mutually exclusive shell/Python branches. A model
+        # violating just one shell field should see that field, not "oneOf".
+        if (name == "recipe" and error.validator == "oneOf" and isinstance(value, dict)
+                and value.get("kind") in {"shell", "python"}):
+            chosen = next((branch for branch in schema.get("oneOf", [])
+                           if branch.get("properties", {}).get("kind", {}).get("const")
+                           == value["kind"]), None)
+            if chosen is not None:
+                error = next(Draft202012Validator(chosen).iter_errors(value), error)
         location = ".".join(map(str, error.absolute_path)) or "<root>"
         # Do not echo rejected code, samples, or arbitrary model text in diagnostics.
         expectation = ""

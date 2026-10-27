@@ -161,6 +161,13 @@ round within the budget. `-vvv` additionally exposes bounded rejected response t
 and selected provider error details. A transport/configuration failure is not
 retried through another source.
 
+If a small local model repeatedly returns a 100-200 byte shell candidate and
+reports `Invalid recipe ... oneOf`, the planner now accepts a compact shell recipe
+and builds the complete recipe in trusted code. Use `--reasoning off` to avoid
+long reasoning passes when testing tiny models, and `--planning-attempts 1 -vvv`
+to inspect one rejected response (which may contain input data). The local runtime
+still validates the complete recipe before saving/executing anything.
+
 For this task the expected solution is `sort`/`uniq` or equivalent native `sort -u`.
 If it selects Python, inspect `fallback_reason` and tool inventory. Planning rounds
 default to four; `--planning-attempts 6` can help diagnose a model that spends rounds

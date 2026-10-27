@@ -227,5 +227,12 @@ def test_planner_schema_requires_complete_action_shapes():
     validator = Draft202012Validator(schema)
     validator.validate({"action": "tools", "commands": ["jq"], "recipe": None})
     validator.validate({"action": "final", "commands": [], "recipe": _shell_document()})
+    validator.validate({"action": "final", "commands": [], "recipe": {
+        "kind": "shell", "pipeline": [{"argv": ["sort", {"input": 0}]}],
+    }})
+    assert not validator.is_valid({"action": "final", "commands": [], "recipe": {
+        "kind": "shell", "pipeline": [{"argv": ["sort", {"input": 0}]}],
+        "permissions": {"write_home": True},
+    }})
     assert not validator.is_valid({"action": "tools", "commands": [], "recipe": None})
     assert not validator.is_valid({"action": "final", "commands": [], "recipe": None})

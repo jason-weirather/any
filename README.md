@@ -144,6 +144,14 @@ Only local sources are allowed by default. `--allow-institutional` and
 `--source` remains subject to that allow-list. No failed request crosses a scope
 boundary automatically.
 
+For native shell plans, the model may return only `kind`, `pipeline`, and an
+optional `output.format` or input format hints. Trusted code supplies structural
+fields from the declared request and validates the resulting complete v2 recipe.
+This reduces boilerplate for small local models without relaxing the executable
+recipe contract or worker confinement. Python fallbacks still need complete
+code, contracts, a reason, and successful synthetic tests. Unknown shell fields
+and invalid command/permission requests are rejected rather than guessed.
+
 Generation sends the task, input metadata, and bounded previews: at most
 `--sample-bytes` per file, 32 immediate names per directory, and 16 KiB total preview
 content. `--sample-bytes 0` sends metadata without file contents or child names.

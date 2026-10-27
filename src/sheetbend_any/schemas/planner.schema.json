@@ -70,16 +70,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "schema_version",
-        "description",
-        "code",
-        "inputs",
-        "output",
-        "parameters",
-        "tests",
-        "kind",
-        "pipeline",
-        "fallback_reason"
+        "kind"
       ],
       "properties": {
         "schema_version": {
@@ -102,9 +93,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "kind",
-              "format",
-              "required_columns"
+              "kind"
             ],
             "properties": {
               "kind": {
@@ -141,8 +130,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "format",
-            "required_columns"
+            "format"
           ],
           "properties": {
             "format": {
@@ -380,44 +368,7 @@
             }
           }
         }
-      },
-      "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "const": "shell"
-            },
-            "code": {
-              "const": ""
-            },
-            "pipeline": {
-              "minItems": 1
-            },
-            "fallback_reason": {
-              "const": ""
-            }
-          }
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "python"
-            },
-            "code": {
-              "minLength": 1
-            },
-            "pipeline": {
-              "maxItems": 0
-            },
-            "fallback_reason": {
-              "minLength": 1
-            },
-            "tests": {
-              "minItems": 1
-            }
-          }
-        }
-      ]
+      }
     }
   }
 }

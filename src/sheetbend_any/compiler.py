@@ -1,6 +1,7 @@
 """Bounded shell-first planning through Sheetbend's existing structured LLM API."""
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,8 +31,15 @@ the lookup result. action='final', commands=[], recipe={...} submits a candidate
 Validation feedback may request a corrected candidate within the stated attempt budget.
 Preserve the task and its acceptance conditions when correcting a candidate.
 
-The recipe has schema_version=2. For kind='shell', code='' and fallback_reason='',
-and pipeline is a nonempty list of {'argv':[...]} stages connected with pipes.
+For a shell command, submit a COMPACT recipe. Do NOT copy the execution recipe
+boilerplate into the response. The trusted coordinator adds the schema version,
+description, input/output contracts, empty code, empty fallback_reason, and tests.
+Example for one text input and text output:
+{"action":"final","commands":[],"recipe":{"kind":"shell","pipeline":[{"argv":["sort",{"input":0}]},{"argv":["uniq"]}],"output":{"format":"text"}}}
+If the output is CSV, TSV, JSON, or bytes, declare the correct output.format.
+For input files with misleading suffixes, supply inputs with correct kind/format.
+Full schema_version=2 recipes remain valid. A shell pipeline is a nonempty list
+of {'argv':[...]} stages connected with pipes.
 The first argv element is a supported command NAME from the inventory, not a path.
 Other elements are literal strings or exactly {'input':index}, {'param':name}, or
 {'context':'now'}. A reference occupies ONE whole argument. It is never interpolated
@@ -88,6 +96,58 @@ class GeneratedRecipe:
     provenance: dict[str, Any]
 
 
+# This is only a model-facing shorthand. Imported, cached and executable recipes
+# still pass the unchanged, complete v2 Recipe validator before any task executes.
+_FILE_FORMATS = {
+    ".csv": "csv", ".tsv": "tsv", ".json": "json", ".txt": "text",
+    ".md": "text", ".log": "text", ".bin": "bytes",
+}
+
+
+def _path_format(path: Path | None) -> str:
+    """Fallback format from a declared filename; stdout is UTF-8 text by default."""
+    return "text" if path is None else _FILE_FORMATS.get(path.suffix.lower(), "text")
+
+
+def _materialize_shell_proposal(value: dict[str, Any], request: Request) -> dict[str, Any]:
+    """Fill omitted *structural* shell fields, never rewrite submitted code or grants.
+
+    The model chooses the pipeline. Input authority comes exclusively from
+    Request.bind; the inferred formats are validation hints, not new reads.
+    A provided field is never replaced, even when invalid. All completed
+    documents go through Recipe's full version-2 contract afterwards.
+    """
+    if value.get("kind") != "shell":
+        return value
+    data = deepcopy(value)
+    data.setdefault("schema_version", 2)
+    data.setdefault("description", (request.task or "Run an explicitly provided pipeline")[:1000])
+    data.setdefault("code", "")
+    data.setdefault("fallback_reason", "")
+    data.setdefault("parameters", {})
+    data.setdefault("tests", [])
+    if "inputs" not in data:
+        data["inputs"] = [
+            {"kind": item.kind,
+             "format": "directory" if item.kind == "directory" else _path_format(item.path),
+             "required_columns": []}
+            for item in request.inputs
+        ]
+    elif isinstance(data["inputs"], list) and len(data["inputs"]) == len(request.inputs):
+        for model_input, item in zip(data["inputs"], request.inputs, strict=True):
+            if isinstance(model_input, dict):
+                model_input.setdefault("kind", item.kind)
+                model_input.setdefault("format", "directory" if item.kind == "directory"
+                                       else _path_format(item.path))
+                model_input.setdefault("required_columns", [])
+    data.setdefault("output", {"format": _path_format(request.output_path),
+                               "required_columns": []})
+    if isinstance(data["output"], dict):
+        data["output"].setdefault("format", _path_format(request.output_path))
+        data["output"].setdefault("required_columns", [])
+    return data
+
+
 def _validate_planner_response(envelope: Any) -> None:
     """Keep the full envelope gate while explaining errors inside final recipes.
 
@@ -137,7 +197,7 @@ class SheetbendCompiler:
     def cache_identity(self) -> dict[str, Any]:
         """Explicit routing/planning choices, not credentials or live endpoint health."""
         return {
-            "planner": "shell-first-v2", "source": self.source, "model": self.model,
+            "planner": "shell-first-v2-compact", "source": self.source, "model": self.model,
             "allowed_scopes": list(self.scopes), "reasoning": self.reasoning,
             "config_path": None if self.config_path is None else str(self.config_path),
             "max_attempts": self.max_attempts,
@@ -215,7 +275,12 @@ class SheetbendCompiler:
                         "task": request.task, "inputs": inspected,
                         "requested_parameters": dict(request.parameters),
                         "output_suffix_hint": None if request.output_path is None else request.output_path.suffixes,
-                        "invocation_now": request.as_of, "commands": inventory,
+                        "invocation_now": request.as_of,
+                        "commands": {
+                            name: {"available": info.get("available", False),
+                                   "notes": info.get("notes", "unprobed")}
+                            for name, info in inventory.items()
+                        },
                         "attempt": attempt, "attempt_limit": self.max_attempts,
                         "attempts_remaining_after_this": self.max_attempts - attempt,
                         "history": history, "feedback": feedback,
@@ -253,7 +318,7 @@ class SheetbendCompiler:
                             last_problem = "The planner requested command metadata but did not submit a final candidate."
                             self._emit(f"Planning round {attempt}: command lookup " + bounded_visible(", ".join(requested), limit=700) + ".")
                             continue
-                        candidate = Recipe(envelope["recipe"])
+                        candidate = Recipe(_materialize_shell_proposal(envelope["recipe"], request))
                         parameters = candidate.bind_parameters(request.parameters)
                         candidate.validate_inputs(request.inputs)
                         if candidate.is_shell:

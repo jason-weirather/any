@@ -405,3 +405,76 @@ def test_model_failure_never_falls_back_or_exposes_provider_body(table, tmp_path
     with pytest.raises(GenerationError) as caught:
         compiler.generate(Request.bind("filter", input_paths=[table], output_path="-"), [])
     assert seen == ["laptop"] and "PRIVATE_PROVIDER_RESPONSE" not in str(caught.value)
+
+
+def test_compact_shell_proposal_becomes_strict_v2_recipe(tmp_path, monkeypatch):
+    source = tmp_path / "words.txt"
+    source.write_text("beta\nalpha\nbeta\n")
+    proposal = {"kind": "shell", "pipeline": [
+        {"argv": ["sort", {"input": 0}]}, {"argv": ["uniq"]},
+    ]}
+    state = scripted_inference(monkeypatch, [final(proposal)])
+    request = Request.bind("Sort lines and remove duplicates", input_paths=[source],
+                           output_path=tmp_path / "result.txt")
+    original = deepcopy(proposal)
+    generated = SheetbendCompiler(max_attempts=1).generate(request, [])
+    result = generated.recipe.to_dict()
+    assert generated.recipe.is_shell
+    assert result == {
+        "schema_version": 2, "kind": "shell", "pipeline": original["pipeline"],
+        "description": "Sort lines and remove duplicates", "code": "",
+        "fallback_reason": "", "parameters": {}, "tests": [],
+        "inputs": [{"kind": "file", "format": "text", "required_columns": []}],
+        "output": {"format": "text", "required_columns": []},
+    }
+    assert proposal == original  # Normalization must not modify model response.
+    prompt = state["prompts"][0][0]
+    assert "COMPACT recipe" in prompt
+    assert len(json.loads(prompt.split("REQUEST DATA:\n", 1)[1])["commands"]) > 0
+    assert not (tmp_path / "result.txt").exists()  # Planning is never task execution.
+
+
+def test_compact_shell_infers_directory_and_json_and_preserves_explicit_columns(tmp_path, monkeypatch):
+    directory = tmp_path / "records"
+    directory.mkdir()
+    full = {"kind": "shell", "pipeline": [{"argv": ["find", {"input": 0}]}],
+            "output": {"format": "json", "required_columns": []}}
+    scripted_inference(monkeypatch, [final(full)])
+    request = Request.bind("Inspect records", input_paths=[directory], output_path=tmp_path / "result.json")
+    document = SheetbendCompiler(max_attempts=1).generate(request, []).recipe.to_dict()
+    assert document["inputs"] == [{"kind": "directory", "format": "directory", "required_columns": []}]
+    assert document["output"] == full["output"]
+
+
+def test_compact_shell_bogus_code_is_rejected_then_repaired(table, monkeypatch):
+    bad = {"kind": "shell", "pipeline": [{"argv": ["sort", {"input": 0}]}],
+           "code": "print('not permitted')"}
+    good = {"kind": "shell", "pipeline": [{"argv": ["sort", {"input": 0}]}]}
+    state = scripted_inference(monkeypatch, [final(bad), final(good)])
+    generated = SheetbendCompiler(max_attempts=2).generate(
+        Request.bind("Sort", input_paths=[table], output_path="-"), [],
+    )
+    assert generated.recipe.is_shell
+    assert generated.provenance["planning_attempts"] == 2
+    response = json.loads(state["prompts"][1][0].split("REQUEST DATA:\n", 1)[1])
+    assert "code" in response["feedback"]["validation_error"]
+
+
+def test_compact_shell_unknown_authority_does_not_get_normalized(table, monkeypatch):
+    extra_authority = {"kind": "shell", "pipeline": [{"argv": ["sort", {"input": 0}]}],
+                       "permissions": {"write_home": True}}
+    state = scripted_inference(monkeypatch, [final(extra_authority)])
+    with pytest.raises(GenerationError, match="exhausted 1"):
+        SheetbendCompiler(max_attempts=1).generate(
+            Request.bind("Sort", input_paths=[table], output_path="-"), [],
+        )
+    assert len(state["prompts"]) == 1
+
+
+def test_python_proposal_cannot_skip_full_contract(table, monkeypatch):
+    state = scripted_inference(monkeypatch, [final({"kind": "python", "code": "def run(a,b,c,d): pass"})])
+    with pytest.raises(GenerationError, match="exhausted 1"):
+        SheetbendCompiler(max_attempts=1).generate(
+            Request.bind("Filter CSV", input_paths=[table], output_path="-"), [],
+        )
+    assert len(state["prompts"]) == 1
